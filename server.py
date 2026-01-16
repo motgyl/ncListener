@@ -9,15 +9,41 @@ import json
 from datetime import datetime
 import os
 import base64
+import sys
+import logging
 
 HOST = '0.0.0.0'
 PORT = 7002
 MESSAGES_FILE = 'messages.json'
 FILES_DIR = 'shared_files'
+LOGS_DIR = 'logs'
 
-# Create files directory if it doesn't exist
+# Create directories if they don't exist
 if not os.path.exists(FILES_DIR):
     os.makedirs(FILES_DIR)
+if not os.path.exists(LOGS_DIR):
+    os.makedirs(LOGS_DIR)
+
+# Setup logging
+log_file = os.path.join(LOGS_DIR, 'server.log')
+logger = logging.getLogger('server')
+logger.setLevel(logging.DEBUG)
+
+# File handler
+fh = logging.FileHandler(log_file)
+fh.setLevel(logging.DEBUG)
+
+# Console handler
+ch = logging.StreamHandler(sys.stdout)
+ch.setLevel(logging.INFO)
+
+# Formatter
+formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+fh.setFormatter(formatter)
+ch.setFormatter(formatter)
+
+logger.addHandler(fh)
+logger.addHandler(ch)
 
 # Shared message storage: [messages]
 messages = []
@@ -33,9 +59,9 @@ def load_messages():
         try:
             with open(MESSAGES_FILE, 'r') as f:
                 messages = json.load(f)
-                print(f"[INFO] Loaded {len(messages)} messages from file")
+                logger.info(f"Loaded {len(messages)} messages from file")
         except Exception as e:
-            print(f"[ERROR] Failed to load messages: {e}")
+            logger.error(f"Failed to load messages: {e}")
             messages = []
     else:
         messages = []
@@ -47,7 +73,7 @@ def save_messages():
         with open(MESSAGES_FILE, 'w') as f:
             json.dump(messages, f, indent=2)
     except Exception as e:
-        print(f"[ERROR] Failed to save messages: {e}")
+        logger.error(f"Failed to save messages: {e}")
 
 
 def format_help():
@@ -82,7 +108,7 @@ Examples:
 
 def handle_client(client_socket, addr):
     """Client connection handler"""
-    print(f"[CONNECT] {addr}")
+    logger.info(f"Client connected: {addr}")
     current_user = None
     
     try:
@@ -119,7 +145,7 @@ def handle_client(client_socket, addr):
                 
                 msg = f"[OK] Logged in as '{current_user}'\n".encode('utf-8')
                 client_socket.send(msg)
-                print(f"[LOGIN] {current_user} ({addr})")
+                logger.info(f"User '{current_user}' logged in from {addr}")
             
             # Command: send
             elif command == 'send' or command == 'post':
@@ -157,7 +183,7 @@ def handle_client(client_socket, addr):
                 
                 response = f"[OK] Message posted\n"
                 client_socket.send(response.encode('utf-8'))
-                print(f"[MESSAGE] {current_user} posted message")
+                logger.info(f"User '{current_user}' posted message")
             
             # Command: read
             elif command == 'read' or command == 'view':
@@ -243,7 +269,7 @@ def handle_client(client_socket, addr):
                     
                     response = f"[OK] File '{filename}' uploaded ({len(file_content)} bytes)\n"
                     client_socket.send(response.encode('utf-8'))
-                    print(f"[UPLOAD] {current_user} uploaded {filename}")
+                    logger.info(f"User '{current_user}' uploaded file '{filename}' ({len(file_content)} bytes)")
                 
                 except ValueError:
                     client_socket.send(b"[ERR] Invalid input\n")
@@ -279,7 +305,7 @@ def handle_client(client_socket, addr):
                     response += b"\n"
                     
                     client_socket.send(response)
-                    print(f"[DOWNLOAD] {current_user} downloaded {filename}")
+                    logger.info(f"User '{current_user}' downloaded file '{filename}'")
                 
                 except Exception as e:
                     client_socket.send(f"[ERR] {str(e)}\n".encode('utf-8'))
@@ -305,13 +331,13 @@ def handle_client(client_socket, addr):
                 client_socket.send(b"[ERR] Unknown command. Type 'help' for commands\n")
     
     except ConnectionResetError:
-        print(f"[DISCONNECT] {addr}")
+        logger.warning(f"Connection reset by peer: {addr}")
     except Exception as e:
-        print(f"[ERROR] {addr}: {e}")
+        logger.error(f"Error handling client {addr}: {e}")
     finally:
         with lock:
             if client_socket in users:
-                print(f"[LOGOUT] {users[client_socket]} ({addr})")
+                logger.info(f"User '{users[client_socket]}' logged out from {addr}")
                 del users[client_socket]
         client_socket.close()
 
@@ -325,8 +351,8 @@ def start_server():
     server.bind((HOST, PORT))
     server.listen(5)
     
-    print(f"[SERVER] Started on {HOST}:{PORT}")
-    print(f"[INFO] Connect with: nc localhost {PORT}\n")
+    logger.info(f"Server started on {HOST}:{PORT}")
+    logger.info(f"Clients can connect with: nc {HOST} {PORT}")
     
     try:
         while True:
@@ -336,7 +362,7 @@ def start_server():
             thread.daemon = True
             thread.start()
     except KeyboardInterrupt:
-        print("\n\n[INFO] Server stopped")
+        logger.info("Server stopped by user")
     finally:
         server.close()
 

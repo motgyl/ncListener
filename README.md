@@ -2,19 +2,19 @@
 
 Simple TCP server for sharing messages and files with all connected users via `netcat`. Messages and files are persisted and available to users who connect later.
 
-## Installation
+## Quick Start
 
-No additional dependencies required. Python 3.6+
-
-## Running the server
-
+### Local Testing
 ```bash
 python3 server.py
 ```
 
-The server will run on `localhost:5555`. 
-- Messages are saved in `messages.json` and automatically loaded on startup
-- Files are stored in `shared_files/` directory
+### Production Deployment (Linux)
+```bash
+sudo bash install.sh
+```
+
+For detailed deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md)
 
 ## Connecting a client
 
@@ -193,6 +193,41 @@ Messages are stored in `messages.json` with the following format:
 - Files are transferred using base64 encoding (compatible with netcat)
 - Maximum file size: 100MB
 - For large-scale deployments, consider using a real database
+
+## Logging
+
+The server logs all activities to `logs/server.log`:
+
+### View logs in real-time
+```bash
+tail -f logs/server.log
+```
+
+### View specific activities
+```bash
+# User logins
+grep "logged in" logs/server.log
+
+# Errors
+grep ERROR logs/server.log
+
+# File uploads
+grep "uploaded" logs/server.log
+```
+
+### Using the log viewer script (on deployed server)
+```bash
+./logs.sh follow      # Follow logs in real-time
+./logs.sh errors      # Show errors
+./logs.sh users       # Show user activity
+./logs.sh files       # Show file transfers
+./logs.sh today       # Show today's logs
+./logs.sh stats       # Show statistics
+```
+
+## 24/7 Deployment
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for complete instructions on running the server as a systemd service.
 
 
 

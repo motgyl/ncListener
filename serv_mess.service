@@ -1,0 +1,23 @@
+[Unit]
+Description=Message Server - File and Message Sharing Server
+After=network.target
+
+[Service]
+Type=simple
+User=memo
+WorkingDirectory=/opt/serv_mess
+ExecStart=/usr/bin/python3 /opt/serv_mess/server.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/serv_mess/logs/server.log
+StandardError=append:/opt/serv_mess/logs/server.log
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/serv_mess/
+
+[Install]
+WantedBy=multi-user.target
