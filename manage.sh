@@ -1,92 +1,98 @@
 #!/bin/bash
-# Service management helper for serv_mess
 
 SERVICE_NAME="serv_mess"
 LOG_FILE="/opt/serv_mess/logs/server.log"
+APP_DIR="/opt/serv_mess"
+VENV_DIR="$APP_DIR/venv"
 
 print_usage() {
-    echo "Usage: $0 <command>"
-    echo ""
-    echo "Commands:"
-    echo "  start      - Start the service"
-    echo "  stop       - Stop the service"
-    echo "  restart    - Restart the service"
-    echo "  status     - Show service status"
-    echo "  logs       - Show last 50 lines of logs"
-    echo "  logs -f    - Follow logs in real-time"
-    echo "  enable     - Enable auto-start on boot"
-    echo "  disable    - Disable auto-start"
-    echo "  info       - Show system info"
+    cat <<EOF
+Usage: $0 <command>
+Commands:
+  start        - Start service (production: systemd)
+  dev          - Run in development mode (python3 server.py)
+  stop         - Stop systemd service
+  restart      - Restart systemd service
+  status       - Show service status
+  logs         - Show logs (file or journal)
+  logs -f      - Follow logs
+  enable       - Enable auto-start on boot
+  disable      - Disable auto-start
+  update       - Pull latest code and reinstall deps
+EOF
+}
+
+start() {
+    echo "Starting service (systemd)..."
+    sudo systemctl start "$SERVICE_NAME"
+    sleep 1
+    sudo systemctl status "$SERVICE_NAME"
+}
+
+dev() {
+    echo "Running in development mode"
+    cd "$APP_DIR" || exit
+    if [ -d "$VENV_DIR" ]; then
+        echo "Activating venv..."
+        source "$VENV_DIR/bin/activate"
+    fi
+    echo "Starting server.py..."
+    python3 server.py
+}
+
+stop() {
+    echo "Stopping service..."
+    sudo systemctl stop "$SERVICE_NAME"
+}
+
+restart() {
+    echo "Restarting service..."
+    sudo systemctl restart "$SERVICE_NAME"
+    sleep 1
+    sudo systemctl status "$SERVICE_NAME"
+}
+
+status() {
+    sudo systemctl status "$SERVICE_NAME"
+}
+
+logs() {
+    if [ "$2" = "-f" ]; then
+        sudo journalctl -u "$SERVICE_NAME" -f
+    else
+        sudo journalctl -u "$SERVICE_NAME" --no-pager | tail -n 100
+    fi
+}
+
+enable() {
+    sudo systemctl enable "$SERVICE_NAME"
+}
+
+disable() {
+    sudo systemctl disable "$SERVICE_NAME"
+}
+
+update() {
+    echo "Updating code..."
+    cd "$APP_DIR" || exit
+    git pull
+    if [ -f "requirements.txt" ]; then
+        echo "Reinstalling dependencies..."
+        if [ -d "$VENV_DIR" ]; then
+            source "$VENV_DIR/bin/activate"
+            pip install -r requirements.txt
+        else
+            pip install -r requirements.txt
+        fi
+    fi
+    echo "Update finished!"
 }
 
 case "$1" in
-    start)
-        echo "Starting $SERVICE_NAME..."
-        sudo systemctl start "$SERVICE_NAME"
-        sleep 1
-        sudo systemctl status "$SERVICE_NAME"
+    start|dev|stop|restart|status|logs|enable|disable|update)
+        $1 "$2"
         ;;
-    
-    stop)
-        echo "Stopping $SERVICE_NAME..."
-        sudo systemctl stop "$SERVICE_NAME"
-        sleep 1
-        echo "Service stopped"
-        ;;
-    
-    restart)
-        echo "Restarting $SERVICE_NAME..."
-        sudo systemctl restart "$SERVICE_NAME"
-        sleep 1
-        sudo systemctl status "$SERVICE_NAME"
-        ;;
-    
-    status)
-        sudo systemctl status "$SERVICE_NAME"
-        ;;
-    
-    logs)
-        if [ "$2" = "-f" ]; then
-            echo "Following logs (Ctrl+C to stop)..."
-            sudo tail -f "$LOG_FILE"
-        else
-            echo "=== Last 50 lines of logs ==="
-            sudo tail -50 "$LOG_FILE"
-        fi
-        ;;
-    
-    enable)
-        echo "Enabling auto-start..."
-        sudo systemctl enable "$SERVICE_NAME"
-        echo "Service will auto-start on boot"
-        ;;
-    
-    disable)
-        echo "Disabling auto-start..."
-        sudo systemctl disable "$SERVICE_NAME"
-        echo "Service will not auto-start"
-        ;;
-    
-    info)
-        echo "=== System Information ==="
-        echo "Service: $SERVICE_NAME"
-        echo "Log file: $LOG_FILE"
-        echo ""
-        echo "=== Service Status ==="
-        sudo systemctl status "$SERVICE_NAME" --no-pager | head -10
-        echo ""
-        echo "=== Port Status ==="
-        sudo netstat -tlnp 2>/dev/null | grep 7002 || echo "Port 7002 not listening"
-        echo ""
-        echo "=== Log File Size ==="
-        sudo du -h "$LOG_FILE"
-        echo ""
-        echo "=== Recent Activity ==="
-        sudo tail -5 "$LOG_FILE"
-        ;;
-    
     *)
         print_usage
-        exit 1
         ;;
 esac
