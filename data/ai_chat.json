@@ -65,6 +65,22 @@
     {
       "role": "assistant",
       "content": "\u0412\u044b \u0441\u043f\u0440\u0430\u0448\u0438\u0432\u0430\u043b\u0438 \u043e \u043f\u043e\u0433\u043e\u0434\u0435 \u0432\u202f\u041e\u043c\u0441\u043a\u0435."
+    },
+    {
+      "role": "user",
+      "content": "hello"
+    },
+    {
+      "role": "assistant",
+      "content": "[ERROR] google-generativeai library is not installed."
+    },
+    {
+      "role": "user",
+      "content": "hello who are u"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! I am a large language model, trained by Google. How can I help you today?"
     }
   ]
 }

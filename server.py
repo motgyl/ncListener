@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Advanced message server with chat, tasks, and AI integration
-Features: authentication, chat, task management, Groq AI
+Features: authentication, chat, task management, Gemini AI with Key Rotation
 """
 
 import socket
@@ -15,19 +15,33 @@ import hashlib
 import uuid
 from typing import Dict, List, Optional, Tuple
 
-# Try to import Groq, but don't fail if it's not installed
+# Google Gemini Imports
 try:
-    from groq import Groq
-    GROQ_AVAILABLE = True
+    import google.generativeai as genai
+    from google.api_core import exceptions
+    GEMINI_AVAILABLE = True
 except ImportError:
-    GROQ_AVAILABLE = False
-    Groq = None
+    GEMINI_AVAILABLE = False
+    print("Warning: google-generativeai library not installed. AI features will be disabled.")
+    print("Run: pip install google-generativeai")
 
 HOST = '0.0.0.0'
 PORT = 7002
 DATA_DIR = 'data'
 LOGS_DIR = 'logs'
-GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')  # Set via environment variable
+
+# ==========================================
+# CONFIGURATION: GEMINI KEYS & MODEL
+# ==========================================
+# Вставьте сюда ваш пак ключей. Если один переполнится, сервер переключится на следующий.
+GEMINI_API_KEYS = [
+    "AIzaSy",
+    "AIzaSy...KEY_2",
+    "AIzaSy...KEY_3"
+]
+
+# Используем быструю модель (Gemini 2.0 Flash Experimental - актуальный аналог "3 flash" на данный момент)
+GEMINI_MODEL_NAME = "gemini-3-flash-preview"  # Проверьте актуальное имя модели в документации Google GenAI
 
 # Create directories if they don't exist
 for d in [DATA_DIR, LOGS_DIR]:
@@ -69,6 +83,73 @@ USERS_FILE = os.path.join(DATA_DIR, 'users.json')
 CHAT_FILE = os.path.join(DATA_DIR, 'chat.json')
 TASKS_FILE = os.path.join(DATA_DIR, 'tasks.json')
 AI_CHAT_FILE = os.path.join(DATA_DIR, 'ai_chat.json')
+
+
+# ==========================================
+# GEMINI MANAGER CLASS
+# ==========================================
+class GeminiManager:
+    def __init__(self, api_keys, model_name):
+        self.api_keys = api_keys
+        self.model_name = model_name
+        self.current_key_index = 0
+        self.model = None
+        
+        if GEMINI_AVAILABLE and self.api_keys:
+            self._initialize_client()
+
+    def _initialize_client(self):
+        """Initializes the client with the current key."""
+        if not self.api_keys:
+            return
+
+        current_key = self.api_keys[self.current_key_index]
+        try:
+            genai.configure(api_key=current_key)
+            self.model = genai.GenerativeModel(self.model_name)
+            logger.info(f"[Gemini] Switched to API Key index: {self.current_key_index}")
+        except Exception as e:
+            logger.error(f"[Gemini] Init error: {e}")
+
+    def _rotate_key(self):
+        """Rotates to the next API key."""
+        if not self.api_keys:
+            return
+        self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
+        logger.warning(f"[Gemini] Quota exhausted. Rotating to key index {self.current_key_index}...")
+        self._initialize_client()
+
+
+    def generate_content(self, history_formatted, attempts=0):
+        """
+        Generates content with key rotation logic.
+        history_formatted: List of messages in Gemini format [{'role': 'user', 'parts': ['...']}, ...]
+        """
+        if not GEMINI_AVAILABLE or not self.model:
+            return "Error: Gemini not initialized or library missing."
+
+        if attempts >= len(self.api_keys):
+            logger.error("[Gemini] All keys exhausted.")
+            return "Error: Server is currently overloaded (All API keys exhausted). Please try again later."
+
+        try:
+            # We use chat mode with history
+            chat = self.model.start_chat(history=history_formatted[:-1]) # All but last
+            last_msg = history_formatted[-1]['parts'][0]
+            
+            response = chat.send_message(last_msg)
+            return response.text
+
+        except exceptions.ResourceExhausted:
+            self._rotate_key()
+            return self.generate_content(history_formatted, attempts + 1)
+        
+        except Exception as e:
+            logger.error(f"[Gemini] Generation error: {e}")
+            return f"Error processing request: {str(e)}"
+
+# Initialize the global manager
+gemini_manager = GeminiManager(GEMINI_API_KEYS, GEMINI_MODEL_NAME)
 
 
 def hash_password(password: str) -> str:
@@ -128,7 +209,7 @@ def format_help():
     """Returns command help"""
     return """
 ========================================
-     Messenger with Tasks & AI
+      Messenger with Tasks & AI
 ========================================
 
 AUTHENTICATION:
@@ -151,7 +232,7 @@ TASKS (after login):
   task delete <task_id>           - delete task
 
 AI CHAT (after login):
-  ai <message>                    - chat with AI (Groq)
+  ai <message>                    - chat with AI (Gemini Flash)
   ai clear                        - clear AI chat history
 
 OTHER:
@@ -197,34 +278,31 @@ def register_user(username: str, password: str) -> bool:
 
 
 def get_ai_response(user_message: str, user_history: List[dict]) -> str:
-    """Get response from Groq API"""
-    if not GROQ_AVAILABLE or not GROQ_API_KEY:
-        return "[INFO] Groq API not configured. Set GROQ_API_KEY environment variable and install groq package."
+    """
+    Get response from Gemini API via GeminiManager.
+    Converts internal history format to Gemini format.
+    Internal: [{'role': 'user', 'content': '...'}, {'role': 'assistant', 'content': '...'}]
+    Gemini:   [{'role': 'user', 'parts': ['...']}, {'role': 'model', 'parts': ['...']}]
+    """
+    if not GEMINI_AVAILABLE:
+        return "[ERROR] google-generativeai library is not installed."
     
-    try:
-        client = Groq(api_key=GROQ_API_KEY)
-        
-        # Prepare messages for API
-        messages = []
-        for msg in user_history[-10:]:  # Last 10 messages to avoid token limits
-            messages.append({
-                "role": msg['role'],
-                "content": msg['content']
-            })
-        
-        # Call Groq API
-        chat_completion = client.chat.completions.create(
-            messages=messages,
-            model="openai/gpt-oss-120b",  # Free model
-            max_tokens=1024,
-            temperature=0.7
-        )
-        
-        return chat_completion.choices[0].message.content
+    # Convert history to Gemini format
+    gemini_history = []
     
-    except Exception as e:
-        logger.error(f"Groq API error: {e}")
-        return f"[ERROR] AI error: {str(e)}"
+    # Add previous context (limit to last 10 turns to save context window/tokens)
+    for msg in user_history[-20:]: 
+        role = 'user' if msg['role'] == 'user' else 'model'
+        content = msg['content']
+        gemini_history.append({
+            "role": role,
+            "parts": [content]
+        })
+    
+    # Ensure the last message in history is the current one we want to send
+    # (The caller of this function appends the user message to history before calling)
+    
+    return gemini_manager.generate_content(gemini_history)
 
 
 def handle_client(client_socket, addr):
@@ -326,6 +404,7 @@ def handle_client(client_socket, addr):
                     if len(action_parts) < 2:
                         client_socket.send(b"[ERR] Empty message\n")
                         continue
+
                     
                     message_text = action_parts[1]
                     
@@ -415,6 +494,7 @@ def handle_client(client_socket, addr):
                     except:
                         client_socket.send(b"Usage: task view <task_id>\n")
                         continue
+
                     
                     with lock:
                         task = tasks.get(task_id)
@@ -505,6 +585,7 @@ def handle_client(client_socket, addr):
                         status_parts = action_parts[1].split()
                         task_id = status_parts[0]
                         new_status = status_parts[1] if len(status_parts) > 1 else None
+
                     except:
                         client_socket.send(b"Usage: task status <task_id> <status>\n")
                         continue
@@ -566,7 +647,7 @@ def handle_client(client_socket, addr):
                         })
                         user_history = list(ai_chat_history[current_user])
                     
-                    # Get response from Groq API
+                    # Get response from Gemini via Manager
                     response_text = get_ai_response(message, user_history)
                     
                     with lock:
